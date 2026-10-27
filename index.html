@@ -695,8 +695,10 @@ textarea.inp{resize:vertical;min-height:130px;line-height:1.5}
   </div>
 </aside>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script>
 (function(){
+  var SBC=null;try{if(window.supabase&&location.protocol.indexOf('http')===0&&!/claude|anthropic/.test(location.hostname))SBC=window.supabase.createClient('https://diuvlkbmgnuuyfdkxamk.supabase.co','eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRpdXZsa2JtZ251dXlmZGt4YW1rIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTMxMTE0NjUsImV4cCI6MjEwODY4NzQ2NX0.9H5t-HbtXBdq97WlprGnLEsBB29_qsPXH7fpy7QQISw')}catch(e){}
   document.documentElement.classList.add('js');
   var WA='https://wa.me/5575998105387',$=function(s,r){return (r||document).querySelector(s)},$$=function(s,r){return Array.prototype.slice.call((r||document).querySelectorAll(s))};
   var reduce=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -897,6 +899,7 @@ textarea.inp{resize:vertical;min-height:130px;line-height:1.5}
     salvar(rec).then(function(ok){done(rec,ok)},function(){done(rec,false)});
   });
   function salvar(rec){
+    if(SBC)return SBC.rpc('inscrever',{p_nome:rec.nome,p_telefone:rec.tel}).then(function(r){if(r.error)throw r.error;return true});
     if(!db)return Promise.resolve(false);
     var p=owner?db.collection('inscritos').add(rec):(uid?db.doc('inscritos/'+uid).set(rec):Promise.reject());
     return p.then(function(){return true});
@@ -1039,6 +1042,24 @@ textarea.inp{resize:vertical;min-height:130px;line-height:1.5}
   $('#polClose').addEventListener('click',closePol);
   document.addEventListener('keydown',function(e){if(e.key==='Escape'){closeSg();if(polw.classList.contains('on'))closePol()}});
   if(location.hash==='#privacidade')openPol();
+
+  /* ============================================================
+     ESTOQUE AO VIVO (banco do CRM no Supabase)
+     O catálogo acima é a reserva. Se o banco responder, o site usa
+     os produtos, preços e estoque cadastrados no CRM e se atualiza
+     sozinho quando algo muda lá.
+     ============================================================ */
+  function sbLoad(){
+    if(!SBC)return;
+    SBC.from('produtos').select('*').eq('ativo',true).order('ordem',{ascending:true}).order('id',{ascending:true}).then(function(r){
+      if(r.error||!r.data||!r.data.length)return;
+      P=r.data.map(function(x){return {id:x.id,n:x.nome,m:x.marca,c:x.categoria,t:x.tipo,p:+x.preco,img:x.foto,e:x.estoque||{}}});
+      var marcas={};P.forEach(function(p){if(p.m)marcas[p.m]=1});MARCAS=Object.keys(marcas);
+      cart=cart.filter(function(x){var p=pf(x.id);return p&&(p.e[x.size]||0)>0}).map(function(x){x.q=Math.min(x.q,pf(x.id).e[x.size]);return x});
+      render();renderCart();
+    });
+  }
+  if(SBC){sbLoad();try{SBC.channel('produtos-site').on('postgres_changes',{event:'*',schema:'public',table:'produtos'},function(){clearTimeout(sbLoad.t);sbLoad.t=setTimeout(sbLoad,400)}).subscribe()}catch(e){}}
 
   render();renderCart();
 })();
