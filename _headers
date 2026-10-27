@@ -1,3 +1,9 @@
 /crm/*
   X-Robots-Tag: noindex, nofollow
   Cache-Control: no-store
+
+/loja.html
+  X-Robots-Tag: noindex, nofollow
+
+/
+  Cache-Control: no-cache
