@@ -67,6 +67,11 @@ label.f>span{font-family:var(--display);letter-spacing:.14em;text-transform:uppe
 .tabs button{padding:9px 14px;border-radius:999px;font-family:var(--display);font-weight:500;font-size:.78rem;letter-spacing:.1em;text-transform:uppercase;color:var(--mut);white-space:nowrap;transition:color .25s,background .25s}
 .tabs button:hover{color:var(--fg)}
 .tabs button.on{background:var(--fg);color:var(--bg)}
+.badge{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 5px;margin-left:4px;border-radius:9px;background:var(--gold);color:var(--on-gold);font-size:.66rem;font-weight:700;letter-spacing:0;vertical-align:1px}
+.pend{border-color:rgba(201,162,75,.45)}
+.pend .li{grid-template-columns:minmax(0,1fr) auto}
+.pend .acts{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;align-items:center}
+.pend select.inp{width:auto;padding:7px 10px;font-size:.8rem}
 .who{font-size:.8rem;color:var(--mut);white-space:nowrap}
 main{padding-block:28px 80px}
 .head{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;margin-bottom:20px}
@@ -174,7 +179,7 @@ tr.off td{opacity:.45}
       <nav class="tabs" id="tabs" aria-label="Seções">
         <button data-t="resumo" class="on">Resumo</button>
         <button data-t="produtos">Produtos</button>
-        <button data-t="vendas">Vendas</button>
+        <button data-t="vendas">Vendas <span class="badge" id="bPend" hidden></span></button>
         <button data-t="clientes">Clientes</button>
         <button data-t="promos">Promoções</button>
       </nav>
@@ -208,6 +213,11 @@ tr.off td{opacity:.45}
     <!-- VENDAS -->
     <section data-v="vendas" hidden>
       <div class="head"><div><div class="eyebrow">Baixa automática no estoque</div><h1>Vendas</h1></div></div>
+      <div class="box pend" id="pendBox" style="margin-bottom:16px" hidden>
+        <h2>Pedidos do site esperando confirmação</h2>
+        <p class="mut" style="margin:-4px 0 6px;font-size:.86rem">Confirme quando o cliente pagar. Só então o estoque baixa.</p>
+        <div class="list" id="pendLista"></div>
+      </div>
       <div class="sale">
         <div class="box">
           <h2>Nova venda</h2>
@@ -318,7 +328,7 @@ tr.off td{opacity:.45}
   $('#out').addEventListener('click',function(){sb.auth.signOut()});
   sb.auth.onAuthStateChange(function(ev,session){
     var u=session&&session.user;
-    if(u&&(!user||user.id!==u.id)){user=u;$('#who').textContent=u.email;show(true);carregar()}
+    if(u&&(!user||user.id!==u.id)){user=u;$('#who').textContent=u.email;show(true);carregar();ouvir()}
     else if(!u){user=null;show(false)}
   });
   sb.auth.getSession().then(function(r){if(!r.data.session)show(false)});
@@ -341,14 +351,18 @@ tr.off td{opacity:.45}
       desenhar();
     }catch(e){fail(e)}
   }
-  function desenhar(){({resumo:resumo,produtos:produtos,vendas:vendas,clientes:clientes,promos:promos})[aba]()}
+  function badge(){var n=D.vendas.filter(function(v){return v.status==='pendente'}).length;var b=$('#bPend');b.textContent=n;b.hidden=!n}
+  var canal=null;
+  function ouvir(){if(canal)return;try{canal=sb.channel('crm-vendas').on('postgres_changes',{event:'INSERT',schema:'public',table:'vendas'},function(ev){
+      carregar();if(ev&&ev.new&&ev.new.status==='pendente')toast('Novo pedido do site: nº '+ev.new.id+'.')}).subscribe()}catch(e){}}
+  function desenhar(){badge();({resumo:resumo,produtos:produtos,vendas:vendas,clientes:clientes,promos:promos})[aba]()}
   function prodById(id){return D.produtos.filter(function(p){return p.id===id})[0]}
   function cliById(id){return D.clientes.filter(function(c){return c.id===id})[0]}
 
   /* ---------- RESUMO ---------- */
   function resumo(){
     var now=new Date(),hoje=now.toDateString(),mes=now.getMonth(),ano=now.getFullYear();
-    var ok=D.vendas.filter(function(v){return v.status!=='cancelada'});
+    var ok=D.vendas.filter(function(v){return v.status==='concluida'});var pend=D.vendas.filter(function(v){return v.status==='pendente'});
     var vh=ok.filter(function(v){return new Date(v.criado_em).toDateString()===hoje});
     var vm=ok.filter(function(v){var d=new Date(v.criado_em);return d.getMonth()===mes&&d.getFullYear()===ano});
     var soma=function(l){return l.reduce(function(s,v){return s+(+v.total)},0)};
@@ -357,8 +371,8 @@ tr.off td{opacity:.45}
     $('#kpis').innerHTML=[
       ['Vendas hoje',money(soma(vh)),vh.length+(vh.length===1?' venda':' vendas')],
       ['Vendas no mês',money(soma(vm)),vm.length+(vm.length===1?' venda':' vendas')],
-      ['Peças em estoque',pecas,D.produtos.filter(function(p){return p.ativo}).length+' produtos ativos'],
-      ['Lista VIP',vip,D.clientes.length+' clientes no total']
+      ['Pedidos do site',pend.length,pend.length?'esperando confirmação':'nenhum pendente'],
+      ['Peças em estoque',pecas,D.produtos.filter(function(p){return p.ativo}).length+' produtos ativos · '+vip+' na Lista VIP']
     ].map(function(k){return '<div class="kpi"><small>'+k[0]+'</small><b>'+k[1]+'</b><span>'+k[2]+'</span></div>'}).join('');
     var baixo=D.produtos.filter(function(p){return p.ativo&&total(p)<=2}).sort(function(a,b){return total(a)-total(b)});
     $('#baixo').innerHTML=baixo.length?baixo.slice(0,10).map(function(p){var t=total(p);
@@ -483,12 +497,28 @@ tr.off td{opacity:.45}
   });
   function vendas(){
     itensVenda();
-    $('#vHist').innerHTML=D.vendas.length?D.vendas.slice(0,60).map(function(v){var c=cliById(v.cliente_id),can=v.status==='cancelada';
-      return '<div class="li" style="grid-template-columns:minmax(0,1fr) auto auto"><div><b>'+(c?esc(c.nome||fmtTel(c.telefone)):'Cliente não informado')+'</b><small>'+dt(v.criado_em,1)+' · '+esc(v.pagamento||'')+' · '+(v.itens||[]).map(function(i){return i.qtd+'× '+esc(i.nome)+' ('+esc(i.tamanho)+')'}).join(', ')+'</small></div>'+
+    var pend=D.vendas.filter(function(v){return v.status==='pendente'});
+    $('#pendBox').hidden=!pend.length;
+    $('#pendLista').innerHTML=pend.map(function(v){var c=cliById(v.cliente_id)||{};
+      return '<div class="li"><div><b>Pedido nº '+v.id+' · '+esc(c.nome||'Cliente')+'</b><small>'+dt(v.criado_em,1)+' · '+fmtTel(c.telefone)+' · '+(v.itens||[]).map(function(i){return i.qtd+'× '+esc(i.nome)+' ('+esc(i.tamanho)+')'}).join(', ')+'</small><div class="num" style="margin-top:4px;font-weight:600">'+money(v.total)+'</div></div>'+
+        '<div class="acts">'+(c.telefone?'<a class="btn sm wa" href="'+waLink(c.telefone,'Oi, '+first(c.nome)+'! Recebemos seu pedido nº '+v.id+' na Mailson Imports.')+'" target="_blank" rel="noopener">WhatsApp</a>':'')+
+        '<select class="inp" data-pag="'+v.id+'" aria-label="Forma de pagamento"><option>Pix</option><option>Dinheiro</option><option>Cartão de débito</option><option>Cartão de crédito</option><option>Outro</option></select>'+
+        '<button class="btn sm gold" data-conf="'+v.id+'">Confirmar</button><button class="btn sm danger" data-cancel="'+v.id+'">Cancelar</button></div></div>'}).join('');
+    var hist=D.vendas.filter(function(v){return v.status!=='pendente'});
+    $('#vHist').innerHTML=hist.length?hist.slice(0,60).map(function(v){var c=cliById(v.cliente_id),can=v.status==='cancelada';
+      return '<div class="li" style="grid-template-columns:minmax(0,1fr) auto auto"><div><b>'+(c?esc(c.nome||fmtTel(c.telefone)):'Cliente não informado')+(v.origem==='site'?' <span class="pill">Site</span>':'')+'</b><small>'+dt(v.criado_em,1)+' · '+esc(v.pagamento||'')+' · '+(v.itens||[]).map(function(i){return i.qtd+'× '+esc(i.nome)+' ('+esc(i.tamanho)+')'}).join(', ')+'</small></div>'+
         '<span class="num" style="'+(can?'text-decoration:line-through;color:var(--mut)':'')+'">'+money(v.total)+'</span>'+
         (can?'<span class="pill bad">Cancelada</span>':'<button class="btn sm danger" data-cancel="'+v.id+'">Cancelar</button>')+'</div>'}).join('')
       :'<div class="empty">Nenhuma venda registrada ainda.</div>';
   }
+  $('#pendLista').addEventListener('click',async function(e){
+    var cf=e.target.closest('[data-conf]'),cn=e.target.closest('[data-cancel]');
+    if(cf){var id=+cf.getAttribute('data-conf');cf.disabled=true;
+      var r=await sb.rpc('confirmar_pedido',{p_venda:id,p_pagamento:$('[data-pag="'+id+'"]').value});
+      if(r.error){cf.disabled=false;return fail(r.error)}await carregar();toast('Pedido nº '+id+' confirmado. Estoque atualizado no site.');return}
+    if(cn){if(cn.dataset.sure!=='1'){cn.dataset.sure='1';cn.textContent='Confirmar?';setTimeout(function(){if(cn.isConnected){cn.dataset.sure='';cn.textContent='Cancelar'}},4000);return}
+      var r2=await sb.rpc('cancelar_venda',{p_venda:+cn.getAttribute('data-cancel')});if(r2.error)return fail(r2.error);await carregar();toast('Pedido cancelado.')}
+  });
   $('#vHist').addEventListener('click',async function(e){var b=e.target.closest('[data-cancel]');if(!b)return;
     if(b.dataset.sure!=='1'){b.dataset.sure='1';b.textContent='Confirmar?';setTimeout(function(){if(b.isConnected){b.dataset.sure='';b.textContent='Cancelar'}},4000);return}
     var r=await sb.rpc('cancelar_venda',{p_venda:+b.getAttribute('data-cancel')});if(r.error)return fail(r.error);
@@ -497,7 +527,7 @@ tr.off td{opacity:.45}
   /* ---------- CLIENTES ---------- */
   $('#cBusca').addEventListener('input',clientes);
   function clientes(){
-    var gasto={};D.vendas.forEach(function(v){if(v.cliente_id&&v.status!=='cancelada')gasto[v.cliente_id]=(gasto[v.cliente_id]||0)+(+v.total)});
+    var gasto={};D.vendas.forEach(function(v){if(v.cliente_id&&v.status==='concluida')gasto[v.cliente_id]=(gasto[v.cliente_id]||0)+(+v.total)});
     var q=$('#cBusca').value.trim().toLowerCase(),qd=digits(q);
     var l=D.clientes.filter(function(c){return !q||(c.nome||'').toLowerCase().indexOf(q)>-1||(qd&&c.telefone.indexOf(qd)>-1)});
     $('#cLista').innerHTML=l.length?l.map(function(c){

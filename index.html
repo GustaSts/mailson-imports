@@ -257,6 +257,12 @@ svg{display:block}
 .df .r.t{color:var(--fg);font-family:var(--display);font-weight:600;font-size:1.2rem}
 .df .btn{width:100%}
 .df small{color:var(--mut);text-align:center;font-size:.8rem}
+.cof{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.cof .inp{padding:12px 14px;font-size:.92rem}
+.df .ferr{margin:-6px 0 0}
+.df .ferr:empty{display:none}
+#checkout.wait{opacity:.6;pointer-events:none}
+@media (max-width:400px){.cof{grid-template-columns:1fr}}
 
 /* promoções no whatsapp */
 .promo{display:grid;grid-template-columns:1.05fr 1fr;gap:56px;align-items:center;border:1px solid rgba(201,162,75,.35);border-radius:14px;padding:clamp(28px,5vw,56px);background:radial-gradient(circle at 0 0,rgba(201,162,75,.12),transparent 55%),var(--surface);position:relative;overflow:hidden}
@@ -690,6 +696,11 @@ textarea.inp{resize:vertical;min-height:130px;line-height:1.5}
     <div class="r"><span>Subtotal</span><span id="sub">R$ 0,00</span></div>
     <div class="r"><span>No Pix (5% off)</span><span id="pix">R$ 0,00</span></div>
     <div class="r t"><span>Total</span><span id="tot">R$ 0,00</span></div>
+    <div class="cof">
+      <input class="inp" id="coNome" autocomplete="name" placeholder="Seu nome" aria-label="Seu nome" maxlength="60">
+      <input class="inp" id="coTel" type="tel" inputmode="tel" autocomplete="tel-national" placeholder="WhatsApp com DDD" aria-label="WhatsApp com DDD" maxlength="16">
+    </div>
+    <p class="ferr" id="coErr" role="alert"></p>
     <a class="btn gold" id="checkout" href="https://wa.me/5575998105387" target="_blank" rel="noopener"><svg><use href="#i-wa"/></svg><span>Finalizar pelo WhatsApp</span></a>
     <small id="shipTxt"></small>
   </div>
@@ -1042,6 +1053,37 @@ textarea.inp{resize:vertical;min-height:130px;line-height:1.5}
   $('#polClose').addEventListener('click',closePol);
   document.addEventListener('keydown',function(e){if(e.key==='Escape'){closeSg();if(polw.classList.contains('on'))closePol()}});
   if(location.hash==='#privacidade')openPol();
+
+
+  /* ============================================================
+     FINALIZAR PEDIDO: grava no CRM como pendente e abre o WhatsApp
+     ============================================================ */
+  maskTel($('#coTel'));
+  ['coNome','coTel'].forEach(function(id){$('#'+id).addEventListener('input',function(){$('#coErr').textContent=''})});
+  try{var _co=JSON.parse(localStorage.getItem('mi_cliente')||'null');if(_co){$('#coNome').value=_co.n||'';$('#coTel').value=_co.t||''}}catch(e){}
+  $('#checkout').addEventListener('click',function(e){
+    if(!cart.length)return;
+    e.preventDefault();
+    var nome=$('#coNome').value.trim(),tel=normTel($('#coTel').value),err=$('#coErr');
+    if(!nome){err.textContent='Escreva seu nome para a loja saber quem está pedindo.';$('#coNome').focus();return}
+    if(!tel){err.textContent='Confira o WhatsApp com DDD, por exemplo (75) 91234-5678.';$('#coTel').focus();return}
+    err.textContent='';
+    try{localStorage.setItem('mi_cliente',JSON.stringify({n:nome,t:$('#coTel').value}))}catch(x){}
+    var base=$('#checkout').getAttribute('href');
+    function msgCom(n){var m='Olá! Sou '+nome+' e quero finalizar '+(n?'o pedido nº '+n:'este pedido')+':\n';var sub=0;
+      cart.forEach(function(x){var p=pf(x.id);sub+=p.p*x.q;m+='\n• '+x.q+'x '+p.n+' '+p.m+' (tam. '+x.size+') - '+money(p.p*x.q)});
+      return m+'\n\nTotal: '+money(sub)}
+    function abrir(url,w){if(w&&!w.closed){w.location.href=url}else{location.href=url}}
+    if(!SBC){window.open(WA+'?text='+encodeURIComponent(msgCom(null)),'_blank','noopener');return}
+    var w=window.open('','_blank');
+    var bt=$('#checkout');bt.classList.add('wait');$('span',bt).textContent='Enviando pedido…';
+    SBC.rpc('criar_pedido',{p_nome:nome,p_telefone:tel,p_itens:cart.map(function(x){return {produto_id:x.id,tamanho:x.size,qtd:x.q}})}).then(function(r){
+      bt.classList.remove('wait');$('span',bt).textContent='Finalizar pelo WhatsApp';
+      if(r.error){if(w)w.close();err.textContent=(r.error.message||'Não foi possível enviar o pedido.')+' Atualizamos a sacola.';sbLoad();return}
+      abrir(WA+'?text='+encodeURIComponent(msgCom(r.data)),w);
+      cart=[];renderCart();closeCart();toast('Pedido nº '+r.data+' enviado. Agora é só mandar a mensagem no WhatsApp.');
+    },function(){bt.classList.remove('wait');$('span',bt).textContent='Finalizar pelo WhatsApp';abrir(WA+'?text='+encodeURIComponent(msgCom(null)),w)});
+  });
 
   /* ============================================================
      ESTOQUE AO VIVO (banco do CRM no Supabase)
